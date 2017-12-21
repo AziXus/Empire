@@ -963,7 +963,8 @@
         }
         else
         {
-            $passwordlist | Format-List URL, UserName, Password | Out-String
+            #Fixed output to return PSObject
+            $passwordlist
         }
 
         if ($msvcr120dllHandle -ne $null) { $kernel32::FreeLibrary($msvcp120dllHandle) | Out-Null }
